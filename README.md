@@ -1,6 +1,6 @@
 # Crush Pricing Intelligence MCP Server
 
-MCP server that gives AI agents access to real-time competitive pricing data across Amazon, Walmart, Costco, and more. Pay-per-query via [x402](https://x402.org) micropayments (USDC on Base).
+MCP server that gives AI agents access to real-time competitive pricing data across Amazon, Walmart, Costco, and more. Pay-per-query via [x402](https://x402.org) micropayments.
 
 ## Quick Start
 
@@ -15,7 +15,8 @@ Add to `~/.claude/settings.json`:
       "command": "npx",
       "args": ["-y", "@crush-rewards/mcp-server"],
       "env": {
-        "CRUSH_WALLET_PRIVATE_KEY": "0x_YOUR_BASE_WALLET_PRIVATE_KEY",
+        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_BASE_WALLET_PRIVATE_KEY",
+        "CRUSH_SOLANA_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY_BASE58",
         "CRUSH_API_KEY": "YOUR_API_KEY"
       }
     }
@@ -23,10 +24,22 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
+You can provide either or both wallet keys. The server will use whichever matches the payment network.
+
 ### Requirements
 
-- **Base wallet with USDC** — for x402 micropayments ($0.005-$0.02 per query)
+- **Base wallet with USDC** and/or **Solana wallet with USDC** — for x402 micropayments ($0.005-$0.02 per query)
 - **API key** — request at [crushrewards.dev](https://crushrewards.dev)
+
+## Supported Payment Methods
+
+| Protocol | Network | Token | How |
+|----------|---------|-------|-----|
+| x402 | **Base** | USDC | Automatic via MCP server (EVM wallet) |
+| x402 | **Solana** | USDC | Automatic via MCP server (Solana wallet) |
+| MPP | **Tempo** | USDC.e | Direct API access (see below) |
+
+The MCP server handles x402 payments on Base and Solana automatically. For MPP on Tempo, use the API directly with an MPP-compatible client like [Sponge](https://paysponge.com).
 
 ## Tools
 
@@ -73,7 +86,9 @@ All tools accept optional parameters:
 
 | Environment Variable | Required | Description |
 |---------------------|----------|-------------|
-| `CRUSH_WALLET_PRIVATE_KEY` | Yes | 0x-prefixed private key for a Base wallet with USDC |
+| `CRUSH_EVM_PRIVATE_KEY` | One of EVM or Solana | 0x-prefixed private key for a Base wallet with USDC |
+| `CRUSH_SOLANA_PRIVATE_KEY` | One of EVM or Solana | Base58-encoded Solana private key with USDC |
+| `CRUSH_WALLET_PRIVATE_KEY` | — | Alias for `CRUSH_EVM_PRIVATE_KEY` |
 | `CRUSH_API_KEY` | Yes | API key for the Crush Pricing API |
 | `CRUSH_API_BASE` | No | API base URL (defaults to `https://api.crushrewards.dev`) |
 
@@ -82,7 +97,7 @@ All tools accept optional parameters:
 1. You call an MCP tool (e.g. `best_price(q: "wireless earbuds")`)
 2. The server makes an HTTP request to the Crush Pricing API
 3. The API returns `402 Payment Required` with x402 payment details
-4. The server automatically signs a USDC payment using your wallet
+4. The server automatically signs a USDC payment using your wallet (Base or Solana)
 5. The request is retried with the payment header
 6. You get the pricing data back
 
@@ -101,7 +116,9 @@ curl -H "X-API-Key: YOUR_KEY" \
   https://api.crushrewards.dev/v1/shopper/best-price?q=wireless+earbuds
 ```
 
-The API also accepts payments via **MPP** (USDC.e on Tempo) and **x402 on Solana**.
+The API accepts payments via:
+- **x402** — USDC on Base and Solana
+- **MPP** — USDC.e on Tempo
 
 ## License
 

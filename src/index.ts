@@ -4,18 +4,20 @@ import { createServer } from "./server.js";
 
 const apiBase =
   process.env.CRUSH_API_BASE ?? "https://api.crushrewards.dev";
-const privateKey = process.env.CRUSH_WALLET_PRIVATE_KEY;
+const evmPrivateKey = process.env.CRUSH_EVM_PRIVATE_KEY ?? process.env.CRUSH_WALLET_PRIVATE_KEY;
+const solanaPrivateKey = process.env.CRUSH_SOLANA_PRIVATE_KEY;
 const apiKey = process.env.CRUSH_API_KEY;
 
-if (!privateKey) {
+if (!evmPrivateKey && !solanaPrivateKey) {
   console.error(
-    "Error: CRUSH_WALLET_PRIVATE_KEY is required.\n" +
-      "Set it to a 0x-prefixed private key for a Base wallet with USDC.\n" +
-      "Example: CRUSH_WALLET_PRIVATE_KEY=0xabc123... crush-mcp",
+    "Error: At least one wallet key is required.\n" +
+      "  CRUSH_EVM_PRIVATE_KEY     — 0x-prefixed Base wallet key (for x402 on Base)\n" +
+      "  CRUSH_SOLANA_PRIVATE_KEY  — base58 Solana wallet key (for x402 on Solana)\n" +
+      "  CRUSH_WALLET_PRIVATE_KEY  — alias for CRUSH_EVM_PRIVATE_KEY\n",
   );
   process.exit(1);
 }
 
-const server = createServer({ apiBase, privateKey, apiKey });
+const server = await createServer({ apiBase, evmPrivateKey, solanaPrivateKey, apiKey });
 const transport = new StdioServerTransport();
 await server.connect(transport);

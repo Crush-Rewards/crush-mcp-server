@@ -5,17 +5,21 @@ import { countrySchema, retailerSchema, daysSchema } from "./lib/schemas.js";
 
 export interface ServerConfig {
   apiBase: string;
-  privateKey: string;
+  evmPrivateKey?: string;
+  solanaPrivateKey?: string;
   apiKey?: string;
 }
 
-export function createServer(config: ServerConfig): McpServer {
+export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
     version: "0.1.0",
   });
 
-  const paidFetch = createPaidFetch(config.privateKey);
+  const paidFetch = await createPaidFetch({
+    evmPrivateKey: config.evmPrivateKey,
+    solanaPrivateKey: config.solanaPrivateKey,
+  });
 
   async function query(path: string, params: Record<string, string | undefined>) {
     const url = new URL(path, config.apiBase);
