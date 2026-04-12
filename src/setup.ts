@@ -91,7 +91,7 @@ export async function runSetup() {
   if (existsSync(WALLET_FILE)) {
     existing = JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
     console.log("  Existing wallet found at ~/.crush/wallet.json");
-    if (existing!.evmAddress) console.log("    Base/Tempo (EVM): " + existing!.evmAddress);
+    if (existing!.evmAddress) console.log("    EVM: " + existing!.evmAddress);
     if (existing!.solanaAddress) console.log("    Solana:           " + existing!.solanaAddress);
     console.log("");
     const reuse = await ask(rl, "  Use existing wallet? (Y/n): ");
@@ -113,6 +113,7 @@ export async function runSetup() {
   const method = await ask(rl, "  Choose (1/2) [1]: ");
 
   let walletConfig: WalletFile = { createdAt: new Date().toISOString() };
+  let evmLabel: "base" | "tempo" | null = "base";
 
   if (method === "2") {
     // Import flow
@@ -137,10 +138,22 @@ export async function runSetup() {
       } catch {
         console.log("  (Could not derive address — key will still be used)");
       }
-    } else {
-      // Base and Tempo both use EVM keys
+      evmLabel = null;
+    } else if (network === "3") {
       const key = await ask(rl, "  Enter your EVM private key (0x-prefixed): ");
       walletConfig.evmPrivateKey = key;
+      evmLabel = "tempo";
+      try {
+        const { privateKeyToAccount } = await import("viem/accounts");
+        const account = privateKeyToAccount(key as `0x${string}`);
+        walletConfig.evmAddress = account.address;
+      } catch {
+        console.log("  (Could not derive address — key will still be used)");
+      }
+    } else {
+      const key = await ask(rl, "  Enter your EVM private key (0x-prefixed): ");
+      walletConfig.evmPrivateKey = key;
+      evmLabel = "base";
       try {
         const { privateKeyToAccount } = await import("viem/accounts");
         const account = privateKeyToAccount(key as `0x${string}`);
@@ -166,11 +179,18 @@ export async function runSetup() {
       const sol = await generateSolanaWallet();
       walletConfig.solanaPrivateKey = sol.privateKey;
       walletConfig.solanaAddress = sol.address;
-    } else {
-      // 1, 3, 4 (default) all generate an EVM wallet
+      evmLabel = null;
+    } else if (network === "3") {
       const evm = await generateEvmWallet();
       walletConfig.evmPrivateKey = evm.privateKey;
       walletConfig.evmAddress = evm.address;
+      evmLabel = "tempo";
+    } else {
+      // 1 or 4 (default) → Base
+      const evm = await generateEvmWallet();
+      walletConfig.evmPrivateKey = evm.privateKey;
+      walletConfig.evmAddress = evm.address;
+      evmLabel = "base";
     }
   }
 
@@ -183,11 +203,16 @@ export async function runSetup() {
   console.log("  Wallet ready:");
   console.log("  ─────────────");
 
-  if (walletConfig.evmAddress) {
+  if (walletConfig.evmAddress && evmLabel === "tempo") {
     console.log("");
-    console.log("  Base / Tempo (EVM):");
+    console.log("  Tempo (EVM):");
     console.log("    Address: " + walletConfig.evmAddress);
-    console.log("    Send USDC on Base or USDC.e on Tempo to this address.");
+    console.log("    Send USDC.e on Tempo to this address.");
+  } else if (walletConfig.evmAddress) {
+    console.log("");
+    console.log("  Base (EVM):");
+    console.log("    Address: " + walletConfig.evmAddress);
+    console.log("    Send USDC on Base to this address.");
   }
 
   if (walletConfig.solanaAddress) {
