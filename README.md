@@ -4,9 +4,33 @@ MCP server that gives AI agents access to real-time competitive pricing data acr
 
 ## Quick Start
 
-### Claude Code
+### Easy Setup (recommended)
 
-Add to `~/.claude/settings.json`:
+```bash
+npx @crush-rewards/mcp-server --setup
+```
+
+This will:
+1. Ask which networks you want (Base, Solana, or both)
+2. Generate a wallet for each selected network
+3. Show your wallet address for funding
+4. Auto-configure Claude Code
+
+Fund your wallet with USDC and you're ready to query.
+
+### Manual Setup
+
+If you already have wallets, add directly to Claude Code:
+
+```bash
+claude mcp add -s user \
+  -e CRUSH_EVM_PRIVATE_KEY=0x... \
+  -e CRUSH_SOLANA_PRIVATE_KEY=... \
+  -e CRUSH_API_KEY=... \
+  crush-pricing -- npx -y @crush-rewards/mcp-server
+```
+
+Or add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -24,11 +48,9 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-You can provide either or both wallet keys. The server will use whichever matches the payment network.
-
 ### Requirements
 
-- **Base wallet with USDC** and/or **Solana wallet with USDC** — for x402 micropayments ($0.005-$0.02 per query)
+- **USDC** on Base and/or Solana — for micropayments ($0.005-$0.02 per query)
 - **API key** — request at [crushrewards.dev](https://crushrewards.dev)
 
 ## Supported Payment Methods
@@ -72,6 +94,12 @@ The MCP server handles x402 payments on Base and Solana automatically. For MPP o
 | `retailer_index` | Pricing index for a retailer |
 | `category_summary` | Comprehensive category pricing summary |
 
+### Utility
+
+| Tool | Description |
+|------|-------------|
+| `wallet_info` | Show your wallet address and funding instructions |
+
 ## Parameters
 
 All tools accept optional parameters:
@@ -91,6 +119,8 @@ All tools accept optional parameters:
 | `CRUSH_WALLET_PRIVATE_KEY` | — | Alias for `CRUSH_EVM_PRIVATE_KEY` |
 | `CRUSH_API_KEY` | Yes | API key for the Crush Pricing API |
 | `CRUSH_API_BASE` | No | API base URL (defaults to `https://api.crushrewards.dev`) |
+
+If no wallet keys are provided, a Base wallet is auto-generated and saved to `~/.crush/wallet.json`.
 
 ## How It Works
 

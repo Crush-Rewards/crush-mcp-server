@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+
+// Handle --setup flag before anything else
+if (process.argv.includes("--setup")) {
+  const { runSetup } = await import("./setup.js");
+  await runSetup();
+  process.exit(0);
+}
+
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "./server.js";
 import { loadOrCreateWallet } from "./lib/wallet.js";
