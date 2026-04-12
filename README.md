@@ -10,22 +10,20 @@ MCP server that gives AI agents access to real-time competitive pricing data acr
 npx @crush-rewards/mcp-server --setup
 ```
 
-This will:
-1. Ask which networks you want (Base, Solana, or both)
-2. Generate a wallet for each selected network
-3. Show your wallet address for funding
-4. Auto-configure Claude Code
+This walks you through:
+1. Creating a new wallet or importing an existing one
+2. Choosing your payment network (Base, Solana, or Tempo)
+3. Auto-configuring Claude Code
 
 Fund your wallet with USDC and you're ready to query.
 
 ### Manual Setup
 
-If you already have wallets, add directly to Claude Code:
+If you prefer to configure manually, add to Claude Code:
 
 ```bash
 claude mcp add -s user \
   -e CRUSH_EVM_PRIVATE_KEY=0x... \
-  -e CRUSH_SOLANA_PRIVATE_KEY=... \
   -e CRUSH_API_KEY=... \
   crush-pricing -- npx -y @crush-rewards/mcp-server
 ```
@@ -39,8 +37,7 @@ Or add to `~/.claude/settings.json`:
       "command": "npx",
       "args": ["-y", "@crush-rewards/mcp-server"],
       "env": {
-        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_BASE_WALLET_PRIVATE_KEY",
-        "CRUSH_SOLANA_PRIVATE_KEY": "YOUR_SOLANA_PRIVATE_KEY_BASE58",
+        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_PRIVATE_KEY",
         "CRUSH_API_KEY": "YOUR_API_KEY"
       }
     }
@@ -50,18 +47,20 @@ Or add to `~/.claude/settings.json`:
 
 ### Requirements
 
-- **USDC** on Base and/or Solana — for micropayments ($0.005-$0.02 per query)
+- **USDC** on Base, Solana, or Tempo — for micropayments ($0.005–$0.02 per query)
 - **API key** — request at [crushrewards.dev](https://crushrewards.dev)
 
-## Supported Payment Methods
+## Supported Payment Networks
 
-| Protocol | Network | Token | How |
-|----------|---------|-------|-----|
-| x402 | **Base** | USDC | Automatic via MCP server (EVM wallet) |
-| x402 | **Solana** | USDC | Automatic via MCP server (Solana wallet) |
-| MPP | **Tempo** | USDC.e | Direct API access (see below) |
+| Protocol | Network | Token | Wallet Type |
+|----------|---------|-------|-------------|
+| x402 | **Base** | USDC | EVM (0x...) |
+| x402 | **Solana** | USDC | Solana (base58) |
+| MPP | **Tempo** | USDC.e | EVM (0x...) |
 
-The MCP server handles x402 payments on Base and Solana automatically. For MPP on Tempo, use the API directly with an MPP-compatible client like [Sponge](https://paysponge.com).
+Base and Tempo share the same EVM wallet address. Solana uses a separate keypair.
+
+The MCP server handles payments automatically — you just call the tools.
 
 ## Tools
 
@@ -100,6 +99,8 @@ The MCP server handles x402 payments on Base and Solana automatically. For MPP o
 |------|-------------|
 | `wallet_info` | Show your wallet address and funding instructions |
 
+Run `npx @crush-rewards/mcp-server --help` to see all tools from the command line.
+
 ## Parameters
 
 All tools accept optional parameters:
@@ -114,7 +115,7 @@ All tools accept optional parameters:
 
 | Environment Variable | Required | Description |
 |---------------------|----------|-------------|
-| `CRUSH_EVM_PRIVATE_KEY` | One of EVM or Solana | 0x-prefixed private key for a Base wallet with USDC |
+| `CRUSH_EVM_PRIVATE_KEY` | One of EVM or Solana | 0x-prefixed private key for a Base/Tempo wallet with USDC |
 | `CRUSH_SOLANA_PRIVATE_KEY` | One of EVM or Solana | Base58-encoded Solana private key with USDC |
 | `CRUSH_WALLET_PRIVATE_KEY` | — | Alias for `CRUSH_EVM_PRIVATE_KEY` |
 | `CRUSH_API_KEY` | Yes | API key for the Crush Pricing API |
@@ -126,8 +127,8 @@ If no wallet keys are provided, a Base wallet is auto-generated and saved to `~/
 
 1. You call an MCP tool (e.g. `best_price(q: "wireless earbuds")`)
 2. The server makes an HTTP request to the Crush Pricing API
-3. The API returns `402 Payment Required` with x402 payment details
-4. The server automatically signs a USDC payment using your wallet (Base or Solana)
+3. The API returns `402 Payment Required` with payment details
+4. The server automatically signs a USDC payment using your wallet
 5. The request is retried with the payment header
 6. You get the pricing data back
 
