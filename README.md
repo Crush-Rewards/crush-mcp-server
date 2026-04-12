@@ -24,7 +24,6 @@ If you prefer to configure manually, add to Claude Code:
 ```bash
 claude mcp add -s user \
   -e CRUSH_EVM_PRIVATE_KEY=0x... \
-  -e CRUSH_API_KEY=... \
   crush-pricing -- npx -y @crush-rewards/mcp-server
 ```
 
@@ -37,8 +36,7 @@ Or add to `~/.claude/settings.json`:
       "command": "npx",
       "args": ["-y", "@crush-rewards/mcp-server"],
       "env": {
-        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_PRIVATE_KEY",
-        "CRUSH_API_KEY": "YOUR_API_KEY"
+        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_PRIVATE_KEY"
       }
     }
   }
@@ -48,7 +46,6 @@ Or add to `~/.claude/settings.json`:
 ### Requirements
 
 - **USDC** on Base, Solana, or Tempo — for micropayments ($0.005–$0.02 per query)
-- **API key** — request at [crushrewards.dev](https://crushrewards.dev)
 
 ## Supported Payment Networks
 
@@ -118,7 +115,7 @@ All tools accept optional parameters:
 | `CRUSH_EVM_PRIVATE_KEY` | One of EVM or Solana | 0x-prefixed private key for a Base/Tempo wallet with USDC |
 | `CRUSH_SOLANA_PRIVATE_KEY` | One of EVM or Solana | Base58-encoded Solana private key with USDC |
 | `CRUSH_WALLET_PRIVATE_KEY` | — | Alias for `CRUSH_EVM_PRIVATE_KEY` |
-| `CRUSH_API_KEY` | Yes | API key for the Crush Pricing API |
+| `CRUSH_API_KEY` | No | Optional API key (payment is the primary auth) |
 | `CRUSH_API_BASE` | No | API base URL (defaults to `https://api.crushrewards.dev`) |
 
 If no wallet keys are provided, a Base wallet is auto-generated and saved to `~/.crush/wallet.json`.
@@ -143,8 +140,7 @@ If you prefer to call the API directly without the MCP server:
 curl https://api.crushrewards.dev/openapi.json
 
 # Example request (returns 402 for payment)
-curl -H "X-API-Key: YOUR_KEY" \
-  https://api.crushrewards.dev/v1/shopper/best-price?q=wireless+earbuds
+curl https://api.crushrewards.dev/v1/shopper/best-price?q=wireless+earbuds
 ```
 
 The API accepts payments via:

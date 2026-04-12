@@ -206,10 +206,6 @@ export async function runSetup() {
 }
 
 async function configureClaudeCode(rl: ReturnType<typeof createInterface>, walletConfig: WalletFile) {
-  // API key
-  console.log("");
-  const apiKey = await ask(rl, "  Enter your API key (or press Enter to skip): ");
-
   // Configure Claude Code
   console.log("");
   const configureClaude = await ask(rl, "  Auto-configure Claude Code? (Y/n): ");
@@ -223,10 +219,6 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>, walle
     if (walletConfig.solanaPrivateKey) {
       envArgs.push("-e", "CRUSH_SOLANA_PRIVATE_KEY=" + walletConfig.solanaPrivateKey);
     }
-    if (apiKey) {
-      envArgs.push("-e", "CRUSH_API_KEY=" + apiKey);
-    }
-
     const cmd = [
       "claude", "mcp", "add",
       "-s", "user",
@@ -255,7 +247,6 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>, walle
     const config: Record<string, string> = {};
     if (walletConfig.evmPrivateKey) config["CRUSH_EVM_PRIVATE_KEY"] = walletConfig.evmPrivateKey;
     if (walletConfig.solanaPrivateKey) config["CRUSH_SOLANA_PRIVATE_KEY"] = walletConfig.solanaPrivateKey;
-    if (apiKey) config["CRUSH_API_KEY"] = apiKey;
     console.log('    "crush-pricing": {');
     console.log('      "command": "npx",');
     console.log('      "args": ["-y", "@crush-rewards/mcp-server"],');
