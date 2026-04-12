@@ -222,8 +222,8 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>, walle
     const cmd = [
       "claude", "mcp", "add",
       "-s", "user",
-      ...envArgs,
       "crush-pricing",
+      ...envArgs,
       "--",
       "npx", "-y", "@crush-rewards/mcp-server",
     ].map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
