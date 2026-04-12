@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createPaidFetch } from "./lib/fetch.js";
 import { countrySchema, retailerSchema, daysSchema } from "./lib/schemas.js";
+import { loadOrCreateWallet } from "./lib/wallet.js";
+import { privateKeyToAccount } from "viem/accounts";
 
 export interface ServerConfig {
   apiBase: string;
@@ -13,13 +15,45 @@ export interface ServerConfig {
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 
   const paidFetch = await createPaidFetch({
     evmPrivateKey: config.evmPrivateKey,
     solanaPrivateKey: config.solanaPrivateKey,
   });
+
+  // ── Wallet info tool ────────────────────────────────────────────
+
+  server.tool(
+    "wallet_info",
+    "Show your wallet address and funding instructions. Call this if a payment fails or to check your wallet.",
+    {},
+    async () => {
+      const lines: string[] = [];
+
+      if (config.evmPrivateKey) {
+        const account = privateKeyToAccount(config.evmPrivateKey as `0x${string}`);
+        lines.push("Base (EVM) wallet: " + account.address);
+        lines.push("  Fund with USDC on Base: https://www.coinbase.com or any Base bridge");
+      }
+
+      if (config.solanaPrivateKey) {
+        lines.push("Solana wallet: configured");
+      }
+
+      if (!config.evmPrivateKey && !config.solanaPrivateKey) {
+        const wallet = await loadOrCreateWallet();
+        lines.push("Auto-generated Base wallet: " + wallet.address);
+        lines.push("Fund with USDC on Base to start making queries.");
+      }
+
+      lines.push("");
+      lines.push("Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.");
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    },
+  );
 
   async function query(path: string, params: Record<string, string | undefined>) {
     const url = new URL(path, config.apiBase);
