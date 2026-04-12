@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-// Handle --setup flag before anything else
+// Handle --help flag
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  const { printHelp } = await import("./setup.js");
+  printHelp();
+  process.exit(0);
+}
+
+// Handle --setup flag
 if (process.argv.includes("--setup")) {
   const { runSetup } = await import("./setup.js");
   await runSetup();
