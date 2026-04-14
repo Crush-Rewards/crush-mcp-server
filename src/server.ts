@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createPaidFetch } from "./lib/fetch.js";
+import { createPaidFetch, PaymentError } from "./lib/fetch.js";
 import { countrySchema, retailerSchema, daysSchema } from "./lib/schemas.js";
 
 export interface ServerConfig {
@@ -15,7 +15,7 @@ export interface ServerConfig {
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
-    version: "0.4.1",
+    version: "0.4.2",
   });
 
   // createPaidFetch validates both keys (throws a helpful error on malformed input)
@@ -29,7 +29,7 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
 
   server.tool(
     "wallet_info",
-    "Show your wallet addresses and funding instructions for all supported chains. Call this if a payment fails or to check your wallet. Keys are never exposed via MCP tools — to export private keys for backup/import, run `npx @crush-rewards/mcp-server --export-keys` in your own terminal.",
+    "Show your wallet addresses and funding instructions for all supported chains. Call this if a payment fails or to check your wallet. Keys are never exposed via MCP tools — to see addresses + config without revealing keys, the user can run `npx @crush-rewards/mcp-server --info` in their terminal. To export private keys for backup/import, they run `--export-keys` instead.",
     {},
     async () => {
       const lines: string[] = [
@@ -37,16 +37,18 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
         "",
         "  Base / Tempo (EVM): " + evmAddress,
         "    • Fund with USDC on Base — https://www.coinbase.com or any Base bridge",
+        "    • Native Base USDC contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         "    • Or USDC.e on Tempo — https://tempo.xyz",
         "",
         "  Solana:             " + solanaAddress,
         "    • Fund with USDC on Solana — https://www.coinbase.com or any Solana wallet",
+        "    • USDC mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "",
         "Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.",
         "",
         "CLI commands (run in your own terminal, not via MCP):",
+        "  --info         Show wallet paths, endpoints, and backup status (no keys shown)",
         "  --export-keys  Dump private keys for backup or importing into MetaMask/Phantom",
-        "  --info         Show wallet paths, endpoints, and backup status",
         "",
         "Bring your own keys instead? Set these env vars and the wallet file is ignored:",
         "  CRUSH_EVM_PRIVATE_KEY, CRUSH_SOLANA_PRIVATE_KEY",
@@ -77,7 +79,34 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
     const headers: Record<string, string> = {};
     if (config.apiKey) headers["X-API-Key"] = config.apiKey;
 
-    const res = await paidFetch(url.toString(), { headers });
+    let res: Response;
+    try {
+      res = await paidFetch(url.toString(), { headers });
+    } catch (err) {
+      // Surface PaymentError with per-chain detail as a bullet list. Models
+      // tend to paraphrase paragraph-style errors into generic "insufficient
+      // balance" — bullets survive summarization better and let the user see
+      // exactly which chain reported what, which is the information needed
+      // to diagnose (wrong token, funded elsewhere, facilitator issue, etc).
+      if (err instanceof PaymentError) {
+        const perChain = err.attempts.length > 0
+          ? err.attempts.map((a) => `  • ${a.network} — ${a.reason}`).join("\n")
+          : "  • no supported chains advertised by server";
+        const text = [
+          "Payment failed. Per-chain reasons:",
+          "",
+          perChain,
+          "",
+          "Next steps:",
+          "  • Run `wallet_info` to see funding addresses.",
+          "  • Native Base USDC is `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` — do not fund USDbC / USDC.e on Base.",
+          "  • If a chain reports insufficient balance but the wallet is funded, verify the token contract on that chain.",
+        ].join("\n");
+        return { content: [{ type: "text" as const, text }], isError: true };
+      }
+      throw err;
+    }
+
     if (!res.ok) {
       const text = await res.text();
       return {
