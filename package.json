@@ -1,6 +1,6 @@
 {
   "name": "@crush-rewards/mcp-server",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "MCP server for Crush Pricing Intelligence API — pay-per-query via x402",
   "type": "module",
   "bin": {
@@ -19,12 +19,16 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@scure/base": "^2.0.0",
     "@solana/kit": "^6.8.0",
-    "@x402/core": "^2.9.0",
-    "@x402/evm": "^2.9.0",
-    "@x402/fetch": "^2.9.0",
-    "@x402/svm": "^2.9.0",
+    "@x402/core": "2.9.0",
+    "@x402/evm": "2.9.0",
+    "@x402/fetch": "2.9.0",
+    "@x402/svm": "2.9.0",
+    "mppx": "0.5.12",
     "viem": "^2.39.3",
     "zod": "^3.24.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

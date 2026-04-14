@@ -1,42 +1,10 @@
 import { createInterface } from "node:readline/promises";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-import { execSync } from "node:child_process";
-
-const WALLET_DIR = join(homedir(), ".crush");
-const WALLET_FILE = join(WALLET_DIR, "wallet.json");
-
-interface WalletFile {
-  evmPrivateKey?: string;
-  evmAddress?: string;
-  solanaPrivateKey?: string;
-  solanaAddress?: string;
-  createdAt: string;
-}
+import { spawnSync } from "node:child_process";
+import { loadOrCreateWallet } from "./lib/wallet.js";
 
 async function ask(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
   const answer = await rl.question(question);
   return answer.trim();
-}
-
-async function generateEvmWallet(): Promise<{ privateKey: string; address: string }> {
-  const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
-  const privateKey = generatePrivateKey();
-  const account = privateKeyToAccount(privateKey);
-  return { privateKey, address: account.address };
-}
-
-async function generateSolanaWallet(): Promise<{ privateKey: string; address: string }> {
-  const { base58 } = await import("@scure/base");
-  const ed25519Key = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
-  const privRaw = new Uint8Array(await crypto.subtle.exportKey("pkcs8", ed25519Key.privateKey));
-  const pubRaw = new Uint8Array(await crypto.subtle.exportKey("raw", ed25519Key.publicKey));
-  const seed = privRaw.slice(privRaw.length - 32);
-  const keypairBytes = new Uint8Array(64);
-  keypairBytes.set(seed, 0);
-  keypairBytes.set(pubRaw, 32);
-  return { privateKey: base58.encode(keypairBytes), address: base58.encode(pubRaw) };
 }
 
 export function printHelp() {
@@ -71,11 +39,29 @@ export function printHelp() {
       category_summary        Comprehensive category summary
 
     Utility
-      wallet_info             Show wallet address and funding info
+      wallet_info             Show wallet addresses and funding instructions
 
-  Payment: USDC on Base, USDC on Solana, or USDC.e on Tempo
+  Payment: USDC on Base, USDC on Solana, or USDC.e on Tempo.
+           Fund any chain — the server auto-selects whichever has balance.
   Docs: https://crushrewards.dev
 `);
+}
+
+function printPrivateKeys(evmKey: string, solanaKey: string) {
+  // Use stderr (fd 2) not stdout (fd 1) so that `--setup | tee setup.log`
+  // doesn't silently persist private keys to whatever file/pipe stdout goes to.
+  // `--setup` is purely interactive; stdout isn't useful here.
+  console.error("");
+  console.error("  ─────────────────────────────────────────────────────────────");
+  console.error("  ⚠️  PRIVATE KEYS — save to a password manager, never share");
+  console.error("  ─────────────────────────────────────────────────────────────");
+  console.error("");
+  console.error("    EVM key (Base/Tempo): " + evmKey);
+  console.error("    Solana key (base58):  " + solanaKey);
+  console.error("");
+  console.error("  Import EVM key into MetaMask/Rabby, Solana key into Phantom/Solflare");
+  console.error("  if you want to fund or manage your balance from an external wallet.");
+  console.error("");
 }
 
 export async function runSetup() {
@@ -86,200 +72,88 @@ export async function runSetup() {
   console.log("  ───────────────────────────────────");
   console.log("");
 
-  // Check for existing wallet
-  let existing: WalletFile | null = null;
-  if (existsSync(WALLET_FILE)) {
-    existing = JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
-    console.log("  Existing wallet found at ~/.crush/wallet.json");
-    if (existing!.evmAddress) console.log("    EVM: " + existing!.evmAddress);
-    if (existing!.solanaAddress) console.log("    Solana:           " + existing!.solanaAddress);
-    console.log("");
-    const reuse = await ask(rl, "  Use existing wallet? (Y/n): ");
-    if (reuse.toLowerCase() !== "n") {
-      await configureClaudeCode(rl, existing!);
-      rl.close();
-      return;
-    }
-    existing = null;
-  }
+  const { wallet, isNew } = await loadOrCreateWallet();
 
-  // Q1: Create or import?
-  console.log("  How would you like to set up your wallet?");
+  console.log(isNew ? "  Generated new multi-chain wallet:" : "  Existing wallet at ~/.crush/wallet.json:");
   console.log("");
-  console.log("    1. Create a new wallet (recommended)");
-  console.log("    2. Import an existing wallet");
+  console.log("    Base / Tempo (EVM): " + wallet.evmAddress);
+  console.log("    Solana:             " + wallet.solanaAddress);
   console.log("");
+  console.log("  Fund any of these — the server picks the one with balance per query.");
 
-  const method = await ask(rl, "  Choose (1/2) [1]: ");
-
-  let walletConfig: WalletFile = { createdAt: new Date().toISOString() };
-  let evmLabel: "base" | "tempo" | null = "base";
-
-  if (method === "2") {
-    // Import flow
-    console.log("");
-    console.log("  Which network is your wallet on?");
-    console.log("");
-    console.log("    1. Base (USDC)");
-    console.log("    2. Solana (USDC)");
-    console.log("    3. Tempo (USDC.e)");
-    console.log("");
-
-    const network = await ask(rl, "  Choose (1/2/3) [1]: ");
-    console.log("");
-
-    if (network === "2") {
-      const key = await ask(rl, "  Enter your Solana private key (base58): ");
-      walletConfig.solanaPrivateKey = key;
-      try {
-        const { base58 } = await import("@scure/base");
-        const bytes = base58.decode(key);
-        walletConfig.solanaAddress = base58.encode(bytes.slice(32));
-      } catch {
-        console.log("  (Could not derive address — key will still be used)");
-      }
-      evmLabel = null;
-    } else if (network === "3") {
-      const key = await ask(rl, "  Enter your EVM private key (0x-prefixed): ");
-      walletConfig.evmPrivateKey = key;
-      evmLabel = "tempo";
-      try {
-        const { privateKeyToAccount } = await import("viem/accounts");
-        const account = privateKeyToAccount(key as `0x${string}`);
-        walletConfig.evmAddress = account.address;
-      } catch {
-        console.log("  (Could not derive address — key will still be used)");
-      }
-    } else {
-      const key = await ask(rl, "  Enter your EVM private key (0x-prefixed): ");
-      walletConfig.evmPrivateKey = key;
-      evmLabel = "base";
-      try {
-        const { privateKeyToAccount } = await import("viem/accounts");
-        const account = privateKeyToAccount(key as `0x${string}`);
-        walletConfig.evmAddress = account.address;
-      } catch {
-        console.log("  (Could not derive address — key will still be used)");
-      }
-    }
+  // Only show keys automatically on fresh generation. For existing wallets we
+  // prompt, so keys don't leak to terminal scrollback when users re-run setup
+  // just to reconfigure Claude Code.
+  if (isNew) {
+    printPrivateKeys(wallet.evmPrivateKey, wallet.solanaPrivateKey);
   } else {
-    // Create new wallet flow
     console.log("");
-    console.log("  Which network?");
-    console.log("");
-    console.log("    1. Base (USDC) — lowest fees");
-    console.log("    2. Solana (USDC)");
-    console.log("    3. Tempo (USDC.e)");
-    console.log("    4. Choose for me");
-    console.log("");
-
-    const network = await ask(rl, "  Choose (1/2/3/4) [4]: ");
-
-    if (network === "2") {
-      const sol = await generateSolanaWallet();
-      walletConfig.solanaPrivateKey = sol.privateKey;
-      walletConfig.solanaAddress = sol.address;
-      evmLabel = null;
-    } else if (network === "3") {
-      const evm = await generateEvmWallet();
-      walletConfig.evmPrivateKey = evm.privateKey;
-      walletConfig.evmAddress = evm.address;
-      evmLabel = "tempo";
-    } else {
-      // 1 or 4 (default) → Base
-      const evm = await generateEvmWallet();
-      walletConfig.evmPrivateKey = evm.privateKey;
-      walletConfig.evmAddress = evm.address;
-      evmLabel = "base";
+    const showKeys = await ask(rl, "  Show private keys? (y/N): ");
+    if (showKeys.toLowerCase() === "y") {
+      printPrivateKeys(wallet.evmPrivateKey, wallet.solanaPrivateKey);
     }
   }
 
-  // Save wallet
-  mkdirSync(WALLET_DIR, { recursive: true });
-  writeFileSync(WALLET_FILE, JSON.stringify(walletConfig, null, 2), { mode: 0o600 });
-
-  // Show wallet info
-  console.log("");
-  console.log("  Wallet ready:");
-  console.log("  ─────────────");
-
-  if (walletConfig.evmAddress && evmLabel === "tempo") {
-    console.log("");
-    console.log("  Tempo (EVM):");
-    console.log("    Address: " + walletConfig.evmAddress);
-    console.log("    Send USDC.e on Tempo to this address.");
-  } else if (walletConfig.evmAddress) {
-    console.log("");
-    console.log("  Base (EVM):");
-    console.log("    Address: " + walletConfig.evmAddress);
-    console.log("    Send USDC on Base to this address.");
-  }
-
-  if (walletConfig.solanaAddress) {
-    console.log("");
-    console.log("  Solana:");
-    console.log("    Address: " + walletConfig.solanaAddress);
-    console.log("    Send USDC on Solana to this address.");
-  }
-
-  console.log("");
-  console.log("  Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.");
-  console.log("  Saved to: ~/.crush/wallet.json");
-
-  await configureClaudeCode(rl, walletConfig);
+  await configureClaudeCode(rl);
   rl.close();
 }
 
-async function configureClaudeCode(rl: ReturnType<typeof createInterface>, walletConfig: WalletFile) {
-  // Configure Claude Code
-  console.log("");
+async function configureClaudeCode(rl: ReturnType<typeof createInterface>) {
   const configureClaude = await ask(rl, "  Auto-configure Claude Code? (Y/n): ");
 
+  // No env args needed — wallet.json is the source of truth.
+  // We keep the command this simple so rotating keys doesn't require re-running `claude mcp add`.
+  const claudeArgs = [
+    "mcp", "add",
+    "-s", "user",
+    "crush-pricing",
+    "--",
+    "npx", "-y", "@crush-rewards/mcp-server",
+  ];
+  const cmdString = "claude " + claudeArgs.join(" ");
+
   if (configureClaude.toLowerCase() !== "n") {
-    const envArgs: string[] = [];
-
-    if (walletConfig.evmPrivateKey) {
-      envArgs.push("-e", "CRUSH_EVM_PRIVATE_KEY=" + walletConfig.evmPrivateKey);
+    // Disclose which `claude` binary we're about to run — defends against PATH hijack
+    // where a malicious ~/bin/claude or node_modules/.bin/claude shadows the real CLI.
+    const which = spawnSync(process.platform === "win32" ? "where" : "which", ["claude"], { encoding: "utf8" });
+    const resolvedPath = which.status === 0 ? which.stdout.trim().split("\n")[0] : "(not found on PATH)";
+    console.log("");
+    console.log("  Running: " + resolvedPath);
+    console.log("  Args:    " + claudeArgs.join(" "));
+    const confirm = await ask(rl, "  Proceed? (Y/n): ");
+    if (confirm.toLowerCase() === "n") {
+      console.log("");
+      console.log("  Skipped. Run manually when ready:");
+      console.log("");
+      console.log("    " + cmdString);
+      return;
     }
-    if (walletConfig.solanaPrivateKey) {
-      envArgs.push("-e", "CRUSH_SOLANA_PRIVATE_KEY=" + walletConfig.solanaPrivateKey);
-    }
-    const cmd = [
-      "claude", "mcp", "add",
-      "-s", "user",
-      "crush-pricing",
-      ...envArgs,
-      "--",
-      "npx", "-y", "@crush-rewards/mcp-server",
-    ].map(a => a.includes(" ") ? `"${a}"` : a).join(" ");
 
-    try {
-      execSync(cmd, { stdio: "inherit" });
+    // spawnSync with argv array — no shell interpolation, no injection risk.
+    const result = spawnSync("claude", claudeArgs, { stdio: "inherit" });
+    if (result.status === 0) {
       console.log("");
       console.log("  Claude Code configured! Open a new session to use the pricing tools.");
-    } catch {
+    } else {
       console.log("");
       console.log("  Could not auto-configure Claude Code.");
       console.log("  Run this manually:");
       console.log("");
-      console.log("    " + cmd);
+      console.log("    " + cmdString);
     }
   } else {
-    // Show manual instructions
     console.log("");
     console.log("  Add this to ~/.claude/settings.json under mcpServers:");
     console.log("");
-    const config: Record<string, string> = {};
-    if (walletConfig.evmPrivateKey) config["CRUSH_EVM_PRIVATE_KEY"] = walletConfig.evmPrivateKey;
-    if (walletConfig.solanaPrivateKey) config["CRUSH_SOLANA_PRIVATE_KEY"] = walletConfig.solanaPrivateKey;
     console.log('    "crush-pricing": {');
     console.log('      "command": "npx",');
-    console.log('      "args": ["-y", "@crush-rewards/mcp-server"],');
-    console.log('      "env": ' + JSON.stringify(config, null, 8).split("\n").map((l, i) => i === 0 ? l : "      " + l).join("\n"));
+    console.log('      "args": ["-y", "@crush-rewards/mcp-server"]');
     console.log("    }");
+    console.log("");
+    console.log("  (Wallet is read from ~/.crush/wallet.json — no env vars needed.)");
   }
 
   console.log("");
-  console.log("  Done! Fund your wallet and start querying.");
+  console.log("  Done! Fund any address above and start querying.");
   console.log("");
 }
