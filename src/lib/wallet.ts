@@ -35,10 +35,20 @@ async function generateSolanaWallet(): Promise<{ privateKey: string; address: st
 /**
  * Refuse to follow symlinks on either the wallet directory or file — an attacker
  * with local filesystem access could otherwise redirect our writes.
+ *
+ * `existsSync` follows symlinks and returns false for a dangling symlink whose
+ * target doesn't exist. We must call `lstatSync` directly and tolerate ENOENT
+ * only when there is truly no path at all.
  */
 function assertNoSymlink(path: string): void {
-  if (!existsSync(path)) return;
-  if (lstatSync(path).isSymbolicLink()) {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  if (st.isSymbolicLink()) {
     throw new Error(
       `Refusing to use ${path}: it is a symlink. Remove it (with care — it may point to a real wallet) ` +
       `and re-run. This check prevents an attacker from redirecting your private keys to a world-readable location.`,

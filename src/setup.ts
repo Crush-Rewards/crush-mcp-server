@@ -39,7 +39,7 @@ export function printHelp() {
       category_summary        Comprehensive category summary
 
     Utility
-      wallet_info             Show wallet addresses (optionally include private keys)
+      wallet_info             Show wallet addresses and funding instructions
 
   Payment: USDC on Base, USDC on Solana, or USDC.e on Tempo.
            Fund any chain — the server auto-selects whichever has balance.
@@ -48,17 +48,20 @@ export function printHelp() {
 }
 
 function printPrivateKeys(evmKey: string, solanaKey: string) {
-  console.log("");
-  console.log("  ─────────────────────────────────────────────────────────────");
-  console.log("  ⚠️  PRIVATE KEYS — save to a password manager, never share");
-  console.log("  ─────────────────────────────────────────────────────────────");
-  console.log("");
-  console.log("    EVM key (Base/Tempo): " + evmKey);
-  console.log("    Solana key (base58):  " + solanaKey);
-  console.log("");
-  console.log("  Import EVM key into MetaMask/Rabby, Solana key into Phantom/Solflare");
-  console.log("  if you want to fund or manage your balance from an external wallet.");
-  console.log("");
+  // Use stderr (fd 2) not stdout (fd 1) so that `--setup | tee setup.log`
+  // doesn't silently persist private keys to whatever file/pipe stdout goes to.
+  // `--setup` is purely interactive; stdout isn't useful here.
+  console.error("");
+  console.error("  ─────────────────────────────────────────────────────────────");
+  console.error("  ⚠️  PRIVATE KEYS — save to a password manager, never share");
+  console.error("  ─────────────────────────────────────────────────────────────");
+  console.error("");
+  console.error("    EVM key (Base/Tempo): " + evmKey);
+  console.error("    Solana key (base58):  " + solanaKey);
+  console.error("");
+  console.error("  Import EVM key into MetaMask/Rabby, Solana key into Phantom/Solflare");
+  console.error("  if you want to fund or manage your balance from an external wallet.");
+  console.error("");
 }
 
 export async function runSetup() {
