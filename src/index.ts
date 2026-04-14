@@ -21,9 +21,9 @@ import { loadOrCreateWallet } from "./lib/wallet.js";
 const DEFAULT_API_BASE = "https://api.crushrewards.dev";
 const rawApiBase = process.env.CRUSH_API_BASE ?? DEFAULT_API_BASE;
 
-// CRUSH_API_BASE controls where we sign and send USDC payments. A malicious or
-// accidental override could redirect funds to an attacker. Refuse non-HTTPS,
-// require explicit opt-in for any non-default origin.
+// CRUSH_API_BASE controls where we sign and send USDC payments. Enforce HTTPS
+// to block plaintext MITM, and warn loudly on any non-default origin so a
+// silently-poisoned env doesn't go unnoticed. Real users should never set this.
 let parsedApiBase: URL;
 try {
   parsedApiBase = new URL(rawApiBase);
@@ -38,13 +38,11 @@ if (parsedApiBase.protocol !== "https:") {
   );
   process.exit(1);
 }
-if (rawApiBase !== DEFAULT_API_BASE && process.env.CRUSH_ALLOW_CUSTOM_API !== "1") {
+if (rawApiBase !== DEFAULT_API_BASE) {
   console.error(
-    `⚠️  CRUSH_API_BASE override detected: ${rawApiBase}\n` +
-    `   This endpoint will receive signed USDC payments.\n` +
-    `   Set CRUSH_ALLOW_CUSTOM_API=1 to acknowledge.`,
+    `⚠️  CRUSH_API_BASE override: ${rawApiBase}\n` +
+    `   This endpoint will receive signed USDC payments. Verify it is trusted.`,
   );
-  process.exit(1);
 }
 const apiBase = rawApiBase;
 const apiKey = process.env.CRUSH_API_KEY;
