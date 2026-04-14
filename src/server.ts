@@ -8,6 +8,8 @@ export interface ServerConfig {
   evmPrivateKey: string;
   solanaPrivateKey: string;
   apiKey?: string;
+  /** True if the user has run --setup at least once to view their keys. */
+  backupAcknowledged?: boolean;
 }
 
 export async function createServer(config: ServerConfig): Promise<McpServer> {
@@ -27,11 +29,11 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
 
   server.tool(
     "wallet_info",
-    "Show your wallet addresses and funding instructions for all supported chains. Call this if a payment fails or to check your wallet. To export private keys (for importing into Phantom/MetaMask), run `npx @crush-rewards/mcp-server --setup` in your terminal — keys are never exposed via MCP tools to protect against prompt injection.",
+    "Show your wallet addresses and funding instructions for all supported chains. Call this if a payment fails or to check your wallet. Keys are never exposed via MCP tools — to export private keys for backup/import, run `npx @crush-rewards/mcp-server --export-keys` in your own terminal.",
     {},
     async () => {
       const lines: string[] = [
-        "Wallets (all funded addresses auto-selected per query):",
+        "Wallets (client auto-picks the chain with balance per query):",
         "",
         "  Base / Tempo (EVM): " + evmAddress,
         "    • Fund with USDC on Base — https://www.coinbase.com or any Base bridge",
@@ -42,9 +44,25 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
         "",
         "Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.",
         "",
-        "To export private keys for external wallet import, run this in your terminal:",
-        "  npx @crush-rewards/mcp-server --setup",
+        "CLI commands (run in your own terminal, not via MCP):",
+        "  --export-keys  Dump private keys for backup or importing into MetaMask/Phantom",
+        "  --info         Show wallet paths, endpoints, and backup status",
+        "",
+        "Bring your own keys instead? Set these env vars and the wallet file is ignored:",
+        "  CRUSH_EVM_PRIVATE_KEY, CRUSH_SOLANA_PRIVATE_KEY",
       ];
+
+      // Fail-safe default: if the caller never set this field (undefined),
+      // still nag about backup. The cost of a spurious warning is low; the
+      // cost of silently skipping it is unrecoverable funds.
+      if (config.backupAcknowledged !== true) {
+        lines.push(
+          "",
+          "⚠️  You have not exported your private keys yet. Run --export-keys before",
+          "   funding — if ~/.crush/wallet.json is deleted without a backup, any USDC",
+          "   sent to these addresses becomes unrecoverable.",
+        );
+      }
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     },
@@ -158,13 +176,14 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
       query("/v1/analyst/inflation", { category, country, days: days?.toString() }),
   );
 
-  server.tool(
-    "shrinkflation_detector",
-    "Detect shrinkflation patterns in a category. Costs $0.02.",
-    { category: z.string().describe("Product category"), country: countrySchema, days: daysSchema },
-    async ({ category, country, days }) =>
-      query("/v1/analyst/shrinkflation", { category, country, days: days?.toString() }),
-  );
+  // Hidden until the backend endpoint is implemented. Re-enable by uncommenting.
+  // server.tool(
+  //   "shrinkflation_detector",
+  //   "Detect shrinkflation patterns in a category. Costs $0.02.",
+  //   { category: z.string().describe("Product category"), country: countrySchema, days: daysSchema },
+  //   async ({ category, country, days }) =>
+  //     query("/v1/analyst/shrinkflation", { category, country, days: days?.toString() }),
+  // );
 
   server.tool(
     "price_dispersion",

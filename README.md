@@ -1,63 +1,88 @@
 # Crush Pricing Intelligence MCP Server
 
-MCP server that gives AI agents access to real-time competitive pricing data across Amazon, Walmart, Costco, and more. Pay-per-query via [x402](https://x402.org) micropayments.
+MCP server that gives AI agents access to real-time competitive pricing data across Amazon, Walmart, Costco, and more. Pay-per-query via [x402](https://x402.org) + MPP micropayments with automatic smart routing across Solana, Base, and Tempo.
 
 ## Quick Start
 
-### Easy Setup (recommended)
+### Option A — Let the MCP manage a wallet (recommended for most users)
 
 ```bash
 npx @crush-rewards/mcp-server --setup
 ```
 
 This walks you through:
-1. Creating a new wallet or importing an existing one
-2. Choosing your payment network (Base, Solana, or Tempo)
-3. Auto-configuring Claude Code
+1. Creating a new multi-chain wallet (or skipping if you prefer BYO — see Option B)
+2. Wiring the MCP into Claude Code
 
-Fund your wallet with USDC and you're ready to query.
-
-### Manual Setup
-
-If you prefer to configure manually, add to Claude Code:
+After setup:
 
 ```bash
-claude mcp add -s user \
-  -e CRUSH_EVM_PRIVATE_KEY=0x... \
-  crush-pricing -- npx -y @crush-rewards/mcp-server
+# Back up your private keys — mandatory before funding
+npx @crush-rewards/mcp-server --export-keys
+
+# Fund any of the printed addresses with USDC (or USDC.e on Tempo) and you're ready
 ```
 
-Or add to `~/.claude/settings.json`:
+### Option B — Bring your own wallet keys
+
+Skip the generated wallet and supply keys yourself. Recommended if you already use a dedicated agent wallet, you're deploying to CI/CD, or you want to manage keys with an HSM/secret manager.
+
+```bash
+# Both env vars are required — setting only one will cause the MCP to exit with an error.
+export CRUSH_EVM_PRIVATE_KEY=0x<your_evm_private_key>
+export CRUSH_SOLANA_PRIVATE_KEY=<your_solana_base58_private_key>
+
+# Still run --setup to wire Claude Code (it won't touch the wallet file when both env vars are set)
+npx @crush-rewards/mcp-server --setup
+```
+
+When both env vars are set, `~/.crush/wallet.json` is ignored entirely.
+
+> ⚠️ Do not use your primary wallet here. Use a dedicated low-balance "agent wallet" — per-query amounts are tiny (0.005–0.02 USDC), so a few dollars buys hundreds of queries.
+
+### Manual MCP config
 
 ```json
 {
   "mcpServers": {
     "crush-pricing": {
       "command": "npx",
-      "args": ["-y", "@crush-rewards/mcp-server"],
-      "env": {
-        "CRUSH_EVM_PRIVATE_KEY": "0x_YOUR_PRIVATE_KEY"
-      }
+      "args": ["-y", "@crush-rewards/mcp-server"]
     }
   }
 }
 ```
 
-### Requirements
+## CLI Commands
 
-- **USDC** on Base, Solana, or Tempo — for micropayments ($0.005–$0.02 per query)
+| Command | Purpose |
+|---------|---------|
+| `npx @crush-rewards/mcp-server` | Start the MCP server (default behavior) |
+| `... --setup` | Interactive setup: choose wallet path, wire Claude Code |
+| `... --export-keys` | Print private keys for backup or importing into Phantom/MetaMask |
+| `... --info` | Show wallet addresses, paths, endpoints, and backup status |
+| `... --help` | Usage overview |
 
 ## Supported Payment Networks
 
 | Protocol | Network | Token | Wallet Type |
 |----------|---------|-------|-------------|
-| x402 | **Base** | USDC | EVM (0x...) |
 | x402 | **Solana** | USDC | Solana (base58) |
-| MPP | **Tempo** | USDC.e | EVM (0x...) |
+| x402 | **Base** | USDC | EVM (`0x...`) |
+| MPP | **Tempo** | USDC.e | EVM (`0x...`) |
 
-Base and Tempo share the same EVM wallet address. Solana uses a separate keypair.
+Base and Tempo share the same EVM address. Solana uses a separate keypair. The client tries chains in that order (Solana first — lowest fees) and falls through when a chain doesn't have enough balance.
 
-The MCP server handles payments automatically — you just call the tools.
+## Smart Routing
+
+On every query, the client:
+
+1. Derives your Solana USDC ATA and checks balance via public RPC. Enough → pay on Solana. Not enough → skip.
+2. Attempts payment on Base. Falls through on insufficient-balance errors only.
+3. Checks USDC.e balance on Tempo, signs an MPP receipt, retries.
+4. All chains exhausted → throws a clear `PaymentError` listing what happened per chain.
+
+Balance pre-checks are **optimizations**. If an RPC is rate-limited or down, the client attempts payment anyway — requests never hang on RPC health.
 
 ## Tools
 
@@ -66,9 +91,9 @@ The MCP server handles payments automatically — you just call the tools.
 | Tool | Description |
 |------|-------------|
 | `best_price` | Find the cheapest price for a product across retailers |
-| `price_history` | Get price trends over time |
-| `deal_finder` | Find current deals in a category |
-| `price_drop_alert` | Check for recent price drops |
+| `price_history` | Price trends over time |
+| `deal_finder` | Current deals in a category |
+| `price_drop_alert` | Recent price drops |
 
 ### Marketing ($0.01/query)
 
@@ -85,7 +110,6 @@ The MCP server handles payments automatically — you just call the tools.
 | Tool | Description |
 |------|-------------|
 | `inflation_tracker` | Category price inflation trends |
-| `shrinkflation_detector` | Detect shrinkflation patterns |
 | `price_dispersion` | Price variance across retailers |
 | `retailer_index` | Pricing index for a retailer |
 | `category_summary` | Comprehensive category pricing summary |
@@ -94,9 +118,7 @@ The MCP server handles payments automatically — you just call the tools.
 
 | Tool | Description |
 |------|-------------|
-| `wallet_info` | Show your wallet address and funding instructions |
-
-Run `npx @crush-rewards/mcp-server --help` to see all tools from the command line.
+| `wallet_info` | Show your wallet addresses and funding instructions |
 
 ## Parameters
 
@@ -110,41 +132,48 @@ All tools accept optional parameters:
 
 ## Configuration
 
-| Environment Variable | Required | Description |
-|---------------------|----------|-------------|
-| `CRUSH_EVM_PRIVATE_KEY` | One of EVM or Solana | 0x-prefixed private key for a Base/Tempo wallet with USDC |
-| `CRUSH_SOLANA_PRIVATE_KEY` | One of EVM or Solana | Base58-encoded Solana private key with USDC |
-| `CRUSH_WALLET_PRIVATE_KEY` | — | Alias for `CRUSH_EVM_PRIVATE_KEY` |
-| `CRUSH_API_KEY` | No | Optional API key (payment is the primary auth) |
-| `CRUSH_API_BASE` | No | API base URL (defaults to `https://api.crushrewards.dev`) |
+All env vars are optional — a wallet is auto-generated on first run.
 
-If no wallet keys are provided, a Base wallet is auto-generated and saved to `~/.crush/wallet.json`.
+| Environment Variable | Description |
+|---------------------|-------------|
+| `CRUSH_EVM_PRIVATE_KEY` | Override the EVM key (Base + Tempo) from the wallet file |
+| `CRUSH_SOLANA_PRIVATE_KEY` | Override the Solana key from the wallet file |
+| `CRUSH_API_KEY` | Optional API key (payment is the primary auth) |
+| `CRUSH_API_BASE` | API base URL (default `https://api.crushrewards.dev`, HTTPS enforced) |
+| `CRUSH_SOLANA_RPC_URL` | Custom Solana RPC for balance checks (default `https://api.mainnet-beta.solana.com`, HTTPS enforced) |
+| `CRUSH_TEMPO_RPC_URL` | Custom Tempo RPC for balance checks (default `https://rpc.tempo.xyz`, HTTPS enforced) |
+
+If both `CRUSH_EVM_PRIVATE_KEY` and `CRUSH_SOLANA_PRIVATE_KEY` are set, `~/.crush/wallet.json` is untouched.
+
+## Security
+
+- Private keys are **never** exposed through MCP tools. Export only via the `--export-keys` CLI command, which prints to stderr in your own terminal.
+- Wallet file uses mode `0o600` and refuses to follow symlinks.
+- RPC URL overrides must be HTTPS (except `localhost`/`127.0.0.1`).
+- Balance caps prevent a hostile RPC from spoofing an implausible balance to keep you on a chain you can't pay on.
+- Error messages are sanitized to strip anything resembling a private key before being surfaced.
 
 ## How It Works
 
-1. You call an MCP tool (e.g. `best_price(q: "wireless earbuds")`)
-2. The server makes an HTTP request to the Crush Pricing API
-3. The API returns `402 Payment Required` with payment details
-4. The server automatically signs a USDC payment using your wallet
-5. The request is retried with the payment header
-6. You get the pricing data back
+1. You call an MCP tool (e.g. `best_price(q: "wireless earbuds")`).
+2. The server makes an HTTP request to the Crush Pricing API.
+3. The API returns `402 Payment Required` with requirements for Solana, Base, and Tempo.
+4. The client runs balance pre-checks, signs a payment on the first eligible chain, and retries.
+5. You get the pricing data back.
 
-All payment handling is automatic and transparent via the [x402 protocol](https://x402.org).
+All payment handling is automatic and transparent via the [x402](https://x402.org) and MPP protocols.
 
 ## Direct API Access
 
-If you prefer to call the API directly without the MCP server:
+Skip the MCP and hit the API directly:
 
 ```bash
-# OpenAPI spec
 curl https://api.crushrewards.dev/openapi.json
-
-# Example request (returns 402 for payment)
-curl https://api.crushrewards.dev/v1/shopper/best-price?q=wireless+earbuds
+curl https://api.crushrewards.dev/v1/shopper/best-price?q=wireless+earbuds  # returns 402
 ```
 
-The API accepts payments via:
-- **x402** — USDC on Base and Solana
+Payments accepted:
+- **x402** — USDC on Solana or Base
 - **MPP** — USDC.e on Tempo
 
 ## License
