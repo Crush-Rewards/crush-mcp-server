@@ -2,23 +2,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createPaidFetch } from "./lib/fetch.js";
 import { countrySchema, retailerSchema, daysSchema } from "./lib/schemas.js";
-import { loadOrCreateWallet } from "./lib/wallet.js";
-import { privateKeyToAccount } from "viem/accounts";
 
 export interface ServerConfig {
   apiBase: string;
-  evmPrivateKey?: string;
-  solanaPrivateKey?: string;
+  evmPrivateKey: string;
+  solanaPrivateKey: string;
   apiKey?: string;
 }
 
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
-    version: "0.2.0",
+    version: "0.3.0",
   });
 
-  const paidFetch = await createPaidFetch({
+  // createPaidFetch validates both keys (throws a helpful error on malformed input)
+  // and returns the derived addresses, so we don't redo the parsing here.
+  const { fetch: paidFetch, evmAddress, solanaAddress } = await createPaidFetch({
     evmPrivateKey: config.evmPrivateKey,
     solanaPrivateKey: config.solanaPrivateKey,
   });
@@ -27,29 +27,24 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
 
   server.tool(
     "wallet_info",
-    "Show your wallet address and funding instructions. Call this if a payment fails or to check your wallet.",
+    "Show your wallet addresses and funding instructions for all supported chains. Call this if a payment fails or to check your wallet. To export private keys (for importing into Phantom/MetaMask), run `npx @crush-rewards/mcp-server --setup` in your terminal — keys are never exposed via MCP tools to protect against prompt injection.",
     {},
     async () => {
-      const lines: string[] = [];
-
-      if (config.evmPrivateKey) {
-        const account = privateKeyToAccount(config.evmPrivateKey as `0x${string}`);
-        lines.push("Base (EVM) wallet: " + account.address);
-        lines.push("  Fund with USDC on Base: https://www.coinbase.com or any Base bridge");
-      }
-
-      if (config.solanaPrivateKey) {
-        lines.push("Solana wallet: configured");
-      }
-
-      if (!config.evmPrivateKey && !config.solanaPrivateKey) {
-        const wallet = await loadOrCreateWallet();
-        lines.push("Auto-generated Base wallet: " + wallet.address);
-        lines.push("Fund with USDC on Base to start making queries.");
-      }
-
-      lines.push("");
-      lines.push("Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.");
+      const lines: string[] = [
+        "Wallets (all funded addresses auto-selected per query):",
+        "",
+        "  Base / Tempo (EVM): " + evmAddress,
+        "    • Fund with USDC on Base — https://www.coinbase.com or any Base bridge",
+        "    • Or USDC.e on Tempo — https://tempo.xyz",
+        "",
+        "  Solana:             " + solanaAddress,
+        "    • Fund with USDC on Solana — https://www.coinbase.com or any Solana wallet",
+        "",
+        "Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.",
+        "",
+        "To export private keys for external wallet import, run this in your terminal:",
+        "  npx @crush-rewards/mcp-server --setup",
+      ];
 
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     },

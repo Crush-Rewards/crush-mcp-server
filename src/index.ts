@@ -18,28 +18,81 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createServer } from "./server.js";
 import { loadOrCreateWallet } from "./lib/wallet.js";
 
-const apiBase =
-  process.env.CRUSH_API_BASE ?? "https://api.crushrewards.dev";
+const DEFAULT_API_BASE = "https://api.crushrewards.dev";
+const rawApiBase = process.env.CRUSH_API_BASE ?? DEFAULT_API_BASE;
+
+// CRUSH_API_BASE controls where we sign and send USDC payments. A malicious or
+// accidental override could redirect funds to an attacker. Refuse non-HTTPS,
+// require explicit opt-in for any non-default origin.
+let parsedApiBase: URL;
+try {
+  parsedApiBase = new URL(rawApiBase);
+} catch {
+  console.error(`CRUSH_API_BASE is not a valid URL: ${rawApiBase}`);
+  process.exit(1);
+}
+if (parsedApiBase.protocol !== "https:") {
+  console.error(
+    `CRUSH_API_BASE must use https:// (got ${parsedApiBase.protocol}). ` +
+    `Refusing to sign USDC payments over plaintext.`,
+  );
+  process.exit(1);
+}
+if (rawApiBase !== DEFAULT_API_BASE && process.env.CRUSH_ALLOW_CUSTOM_API !== "1") {
+  console.error(
+    `⚠️  CRUSH_API_BASE override detected: ${rawApiBase}\n` +
+    `   This endpoint will receive signed USDC payments.\n` +
+    `   Set CRUSH_ALLOW_CUSTOM_API=1 to acknowledge.`,
+  );
+  process.exit(1);
+}
+const apiBase = rawApiBase;
 const apiKey = process.env.CRUSH_API_KEY;
 
-let evmPrivateKey = process.env.CRUSH_EVM_PRIVATE_KEY ?? process.env.CRUSH_WALLET_PRIVATE_KEY;
-const solanaPrivateKey = process.env.CRUSH_SOLANA_PRIVATE_KEY;
+// Env vars still supported as overrides for advanced users (CI, shared secrets,
+// read-only home dirs). If *both* are provided, we skip the wallet file entirely —
+// preserving v0.2.x behavior where env-only users never had a wallet.json created.
+if (!process.env.CRUSH_EVM_PRIVATE_KEY && process.env.CRUSH_WALLET_PRIVATE_KEY) {
+  console.error(
+    "⚠️  CRUSH_WALLET_PRIVATE_KEY is deprecated; rename to CRUSH_EVM_PRIVATE_KEY. " +
+    "Legacy alias will be removed in a future release.",
+  );
+}
+const envEvmKey = process.env.CRUSH_EVM_PRIVATE_KEY ?? process.env.CRUSH_WALLET_PRIVATE_KEY;
+const envSolanaKey = process.env.CRUSH_SOLANA_PRIVATE_KEY;
 
-if (!evmPrivateKey && !solanaPrivateKey) {
-  const wallet = await loadOrCreateWallet();
-  evmPrivateKey = wallet.privateKey;
+let evmPrivateKey: string;
+let solanaPrivateKey: string;
 
-  if (wallet.isNew) {
+if (envEvmKey && envSolanaKey) {
+  evmPrivateKey = envEvmKey;
+  solanaPrivateKey = envSolanaKey;
+} else {
+  // At least one key missing → load (and maybe generate) wallet file
+  const { wallet, isNew, migrated } = await loadOrCreateWallet();
+  evmPrivateKey = envEvmKey ?? wallet.evmPrivateKey;
+  solanaPrivateKey = envSolanaKey ?? wallet.solanaPrivateKey;
+
+  if (isNew) {
     console.error([
       "",
-      "  New wallet generated for Crush Pricing Intelligence API",
+      "  New multi-chain wallet generated for Crush Pricing Intelligence API",
       "",
-      "  Address: " + wallet.address,
+      "  Base / Tempo (EVM): " + wallet.evmAddress,
+      "  Solana:             " + wallet.solanaAddress,
+      "",
+      "  Fund any of the above — the server auto-picks the chain with balance.",
+      "  Run `npx @crush-rewards/mcp-server --setup` to see private keys for import.",
       "  Saved to: ~/.crush/wallet.json",
       "",
-      "  Fund this address with USDC on Base to start querying.",
-      "  Get USDC: https://www.coinbase.com or any Base bridge",
-      "  Even $1 gets you 50-200 queries.",
+    ].join("\n"));
+  } else if (migrated) {
+    console.error([
+      "",
+      "  Wallet migrated to multi-chain format (existing keys preserved).",
+      "",
+      "    Base / Tempo (EVM): " + wallet.evmAddress,
+      "    Solana:             " + wallet.solanaAddress,
       "",
     ].join("\n"));
   }
