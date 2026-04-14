@@ -69,26 +69,19 @@ export async function runSetup() {
   console.log("  ───────────────────────────────────");
   console.log("");
 
-  const { wallet, isNew, migrated } = await loadOrCreateWallet();
+  const { wallet, isNew } = await loadOrCreateWallet();
 
-  if (isNew) {
-    console.log("  Generated new multi-chain wallet:");
-  } else if (migrated) {
-    console.log("  Migrated existing wallet to multi-chain format (existing keys preserved):");
-  } else {
-    console.log("  Existing wallet at ~/.crush/wallet.json:");
-  }
-
+  console.log(isNew ? "  Generated new multi-chain wallet:" : "  Existing wallet at ~/.crush/wallet.json:");
   console.log("");
   console.log("    Base / Tempo (EVM): " + wallet.evmAddress);
   console.log("    Solana:             " + wallet.solanaAddress);
   console.log("");
   console.log("  Fund any of these — the server picks the one with balance per query.");
 
-  // Only show keys automatically on fresh generation or migration — never for
-  // an existing wallet the user may just be re-running setup on. For existing
-  // wallets, we prompt, so keys don't leak to terminal scrollback unexpectedly.
-  if (isNew || migrated) {
+  // Only show keys automatically on fresh generation. For existing wallets we
+  // prompt, so keys don't leak to terminal scrollback when users re-run setup
+  // just to reconfigure Claude Code.
+  if (isNew) {
     printPrivateKeys(wallet.evmPrivateKey, wallet.solanaPrivateKey);
   } else {
     console.log("");

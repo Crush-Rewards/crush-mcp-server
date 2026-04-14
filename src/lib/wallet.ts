@@ -10,15 +10,6 @@ export interface WalletConfig {
   solanaAddress: string;
 }
 
-// Legacy format — pre-0.3.0 wallets may have only EVM or only Solana fields
-interface LegacyWalletConfig {
-  createdAt: string;
-  evmPrivateKey?: string;
-  evmAddress?: string;
-  solanaPrivateKey?: string;
-  solanaAddress?: string;
-}
-
 const WALLET_DIR = join(homedir(), ".crush");
 const WALLET_FILE = join(WALLET_DIR, "wallet.json");
 
@@ -43,12 +34,11 @@ async function generateSolanaWallet(): Promise<{ privateKey: string; address: st
 
 /**
  * Refuse to follow symlinks on either the wallet directory or file — an attacker
- * with local filesystem access could otherwise redirect our writes (C2/I1 in review).
+ * with local filesystem access could otherwise redirect our writes.
  */
 function assertNoSymlink(path: string): void {
   if (!existsSync(path)) return;
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink()) {
+  if (lstatSync(path).isSymbolicLink()) {
     throw new Error(
       `Refusing to use ${path}: it is a symlink. Remove it (with care — it may point to a real wallet) ` +
       `and re-run. This check prevents an attacker from redirecting your private keys to a world-readable location.`,
@@ -59,20 +49,15 @@ function assertNoSymlink(path: string): void {
 function saveWallet(config: WalletConfig): void {
   assertNoSymlink(WALLET_DIR);
   mkdirSync(WALLET_DIR, { recursive: true, mode: 0o700 });
-  // mode on mkdirSync/writeFileSync is only applied at creation; force tightening
-  // on existing dir/file to guard against earlier versions or backups that left
-  // the file world-readable.
-  try { chmodSync(WALLET_DIR, 0o700); } catch { /* ignore — best-effort on platforms that may not support chmod */ }
+  // mode on mkdirSync/writeFileSync only applies at creation; force-tighten
+  // existing dir/file so a user who restored a backup with loose perms is safe.
+  try { chmodSync(WALLET_DIR, 0o700); } catch { /* best-effort */ }
 
   assertNoSymlink(WALLET_FILE);
   writeFileSync(WALLET_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
   try { chmodSync(WALLET_FILE, 0o600); } catch { /* best-effort */ }
 }
 
-/**
- * If the wallet file already exists with permissive mode (group/world readable),
- * warn the user loudly. Run once at load-time.
- */
 function warnIfPermissive(): void {
   if (!existsSync(WALLET_FILE)) return;
   try {
@@ -83,59 +68,32 @@ function warnIfPermissive(): void {
         `Fix with: chmod 600 ${WALLET_FILE}`,
       );
     }
-  } catch {
-    /* best-effort */
-  }
+  } catch { /* best-effort */ }
 }
 
 /**
- * Loads the wallet from ~/.crush/wallet.json, generating any missing chain keys.
- *
- * - If no wallet exists: generates EVM + Solana wallets, returns `isNew: true`
- * - If wallet has only EVM (legacy): generates Solana, merges, saves, returns `migrated: true`
- * - If wallet has only Solana (legacy): generates EVM, merges, saves, returns `migrated: true`
- * - If wallet has both: returns as-is
+ * Loads the wallet from ~/.crush/wallet.json, or generates a new multi-chain
+ * wallet if none exists. The wallet is always authoritative — no partial state.
  */
 export async function loadOrCreateWallet(): Promise<{
   wallet: WalletConfig;
   isNew: boolean;
-  migrated: boolean;
 }> {
   warnIfPermissive();
 
-  if (!existsSync(WALLET_FILE)) {
-    const [evm, solana] = await Promise.all([generateEvmWallet(), generateSolanaWallet()]);
-    const wallet: WalletConfig = {
-      createdAt: new Date().toISOString(),
-      evmPrivateKey: evm.privateKey,
-      evmAddress: evm.address,
-      solanaPrivateKey: solana.privateKey,
-      solanaAddress: solana.address,
-    };
-    saveWallet(wallet);
-    return { wallet, isNew: true, migrated: false };
+  if (existsSync(WALLET_FILE)) {
+    const wallet: WalletConfig = JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
+    return { wallet, isNew: false };
   }
 
-  const existing: LegacyWalletConfig = JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
-  let migrated = false;
-
-  if (!existing.evmPrivateKey || !existing.evmAddress) {
-    const evm = await generateEvmWallet();
-    existing.evmPrivateKey = evm.privateKey;
-    existing.evmAddress = evm.address;
-    migrated = true;
-  }
-
-  if (!existing.solanaPrivateKey || !existing.solanaAddress) {
-    const solana = await generateSolanaWallet();
-    existing.solanaPrivateKey = solana.privateKey;
-    existing.solanaAddress = solana.address;
-    migrated = true;
-  }
-
-  const wallet = existing as WalletConfig;
-
-  if (migrated) saveWallet(wallet);
-
-  return { wallet, isNew: false, migrated };
+  const [evm, solana] = await Promise.all([generateEvmWallet(), generateSolanaWallet()]);
+  const wallet: WalletConfig = {
+    createdAt: new Date().toISOString(),
+    evmPrivateKey: evm.privateKey,
+    evmAddress: evm.address,
+    solanaPrivateKey: solana.privateKey,
+    solanaAddress: solana.address,
+  };
+  saveWallet(wallet);
+  return { wallet, isNew: true };
 }

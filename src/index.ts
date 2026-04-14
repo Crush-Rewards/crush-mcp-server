@@ -22,8 +22,7 @@ const DEFAULT_API_BASE = "https://api.crushrewards.dev";
 const rawApiBase = process.env.CRUSH_API_BASE ?? DEFAULT_API_BASE;
 
 // CRUSH_API_BASE controls where we sign and send USDC payments. Enforce HTTPS
-// to block plaintext MITM, and warn loudly on any non-default origin so a
-// silently-poisoned env doesn't go unnoticed. Real users should never set this.
+// to block plaintext MITM, and warn loudly on any non-default origin.
 let parsedApiBase: URL;
 try {
   parsedApiBase = new URL(rawApiBase);
@@ -47,16 +46,9 @@ if (rawApiBase !== DEFAULT_API_BASE) {
 const apiBase = rawApiBase;
 const apiKey = process.env.CRUSH_API_KEY;
 
-// Env vars still supported as overrides for advanced users (CI, shared secrets,
-// read-only home dirs). If *both* are provided, we skip the wallet file entirely —
-// preserving v0.2.x behavior where env-only users never had a wallet.json created.
-if (!process.env.CRUSH_EVM_PRIVATE_KEY && process.env.CRUSH_WALLET_PRIVATE_KEY) {
-  console.error(
-    "⚠️  CRUSH_WALLET_PRIVATE_KEY is deprecated; rename to CRUSH_EVM_PRIVATE_KEY. " +
-    "Legacy alias will be removed in a future release.",
-  );
-}
-const envEvmKey = process.env.CRUSH_EVM_PRIVATE_KEY ?? process.env.CRUSH_WALLET_PRIVATE_KEY;
+// Env vars are supported as overrides for advanced users (CI, shared secrets,
+// read-only home dirs). If both are provided, we skip the wallet file entirely.
+const envEvmKey = process.env.CRUSH_EVM_PRIVATE_KEY;
 const envSolanaKey = process.env.CRUSH_SOLANA_PRIVATE_KEY;
 
 let evmPrivateKey: string;
@@ -66,8 +58,7 @@ if (envEvmKey && envSolanaKey) {
   evmPrivateKey = envEvmKey;
   solanaPrivateKey = envSolanaKey;
 } else {
-  // At least one key missing → load (and maybe generate) wallet file
-  const { wallet, isNew, migrated } = await loadOrCreateWallet();
+  const { wallet, isNew } = await loadOrCreateWallet();
   evmPrivateKey = envEvmKey ?? wallet.evmPrivateKey;
   solanaPrivateKey = envSolanaKey ?? wallet.solanaPrivateKey;
 
@@ -82,15 +73,6 @@ if (envEvmKey && envSolanaKey) {
       "  Fund any of the above — the server auto-picks the chain with balance.",
       "  Run `npx @crush-rewards/mcp-server --setup` to see private keys for import.",
       "  Saved to: ~/.crush/wallet.json",
-      "",
-    ].join("\n"));
-  } else if (migrated) {
-    console.error([
-      "",
-      "  Wallet migrated to multi-chain format (existing keys preserved).",
-      "",
-      "    Base / Tempo (EVM): " + wallet.evmAddress,
-      "    Solana:             " + wallet.solanaAddress,
       "",
     ].join("\n"));
   }
