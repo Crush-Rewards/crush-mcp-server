@@ -235,11 +235,12 @@ export async function runExportKeys() {
     console.error("");
     process.exit(1);
   }
-  // Read-only load: never regenerate from this command. If the file vanished
-  // between walletFileExists() and here (TOCTOU), surface the error — do not
-  // silently create a new wallet the user would then back up instead of the
-  // old, funded one.
-  const wallet = loadWallet();
+  // Read-only load (plus silent migration if legacy keys are missing): never
+  // regenerate from scratch here. If the file vanished between
+  // walletFileExists() and now (TOCTOU), surface the error instead of
+  // creating a fresh wallet the user would then back up instead of the old,
+  // funded one.
+  const wallet = await loadWallet();
   printPrivateKeys(wallet.evmPrivateKey, wallet.solanaPrivateKey);
 }
 
@@ -267,9 +268,12 @@ export async function runInfo() {
       "                 ~/.crush/wallet.json is ignored when both env vars are set.",
     );
   } else if (walletFileExists()) {
-    // Read-only — we never want --info to create a wallet as a side effect.
+    // Read-only — we never want --info to create a wallet from scratch. If
+    // the file is missing keys for either chain, `loadWallet` silently migrates
+    // (adds the missing chain, preserves the existing one), which is the right
+    // behavior for --info: the user expects to see their complete wallet.
     try {
-      const wallet = loadWallet();
+      const wallet = await loadWallet();
       console.log("  Wallet file: " + WALLET_FILE);
       console.log("    Created:        " + wallet.createdAt);
       console.log("    Base / Tempo:   " + wallet.evmAddress);

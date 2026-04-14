@@ -12,19 +12,48 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+/**
+ * Current wallet schema version. Bump when the file shape changes in a way
+ * that requires an explicit migration branch in `loadOrCreateWallet`. Files
+ * written before this field existed (v0.3.0 and earlier) are treated as
+ * version 1 on read.
+ */
+export const CURRENT_WALLET_SCHEMA_VERSION = 1;
+
+/**
+ * The in-memory, post-migration wallet shape. Callers can rely on every chain's
+ * keys being populated. Anything that may be missing on disk is reconciled by
+ * `migrateLegacyWallet` before reaching consumers.
+ */
 export interface WalletConfig {
+  schemaVersion: number;
   createdAt: string;
   evmPrivateKey: string;
   evmAddress: string;
   solanaPrivateKey: string;
   solanaAddress: string;
   /**
-   * Set when the user has explicitly viewed their private keys via `--setup`.
-   * While unset, the server prints a backup-reminder banner on every startup.
-   * The only way to lose funds with this MCP is a wallet file that was never
-   * exported before being deleted — this field is how we harass the user into
-   * not letting that happen.
+   * Set when the user has explicitly viewed their private keys via
+   * `--export-keys`. While unset, the server prints a backup-reminder banner
+   * on every startup. The only way to lose funds with this MCP is a wallet
+   * file that was never exported before being deleted — this field is how we
+   * harass the user into not letting that happen.
    */
+  backupAcknowledgedAt?: string;
+}
+
+/**
+ * The on-disk shape we may encounter. Older versions wrote partial files
+ * (v0.2.x: EVM only; hypothetical future: Solana only), so every key-bearing
+ * field is optional until `migrateLegacyWallet` fills in the gaps.
+ */
+interface RawWalletConfig {
+  schemaVersion?: number;
+  createdAt?: string;
+  evmPrivateKey?: string;
+  evmAddress?: string;
+  solanaPrivateKey?: string;
+  solanaAddress?: string;
   backupAcknowledgedAt?: string;
 }
 
@@ -122,10 +151,10 @@ function warnIfPermissive(): void {
  * against deletion. A panicked user facing a raw `SyntaxError` might `rm` the
  * file — and that's the one action that destroys funds unrecoverably.
  */
-function parseWalletFile(): WalletConfig {
+function parseWalletFile(): RawWalletConfig {
   const raw = readFileSync(WALLET_FILE, "utf-8");
   try {
-    return JSON.parse(raw) as WalletConfig;
+    return JSON.parse(raw) as RawWalletConfig;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -139,17 +168,28 @@ function parseWalletFile(): WalletConfig {
 }
 
 /**
- * Loads the wallet without ever generating one. Throws if the file is missing
- * or corrupt. Use this instead of `loadOrCreateWallet` anywhere a create would
- * be the wrong answer — especially `--export-keys`, where silent regeneration
- * would have the user back up keys that aren't the ones they funded.
+ * Loads the wallet without ever generating one from scratch. Missing chain
+ * keys are auto-generated and persisted (migration), but a missing file is
+ * treated as an error — use `loadOrCreateWallet` if fresh creation is OK.
+ *
+ * Used by `--export-keys` (needs all keys to back up) and `--info` (wants a
+ * fully-resolved view). Both benefit from migration persisting, so subsequent
+ * runs don't re-migrate.
  */
-export function loadWallet(): WalletConfig {
+export async function loadWallet(): Promise<WalletConfig> {
   warnIfPermissive();
   if (!existsSync(WALLET_FILE)) {
     throw new Error(`No wallet found at ${WALLET_FILE}`);
   }
-  return parseWalletFile();
+  const loaded = parseWalletFile();
+  const { wallet, keyChanges, schemaTagged } = await migrateLegacyWallet(loaded);
+  if (keyChanges.length > 0 || schemaTagged) {
+    saveWallet(wallet);
+  }
+  if (keyChanges.length > 0) {
+    logMigrations(keyChanges);
+  }
+  return wallet;
 }
 
 /**
@@ -157,21 +197,38 @@ export function loadWallet(): WalletConfig {
  * `--export-keys` after the private keys are displayed. Persists by rewriting
  * the wallet file with the new timestamp.
  *
- * Corrupt-JSON errors are propagated (not swallowed) — if the wallet file is
- * corrupt, the user needs to know. Missing file is a no-op (BYO env-var path
- * calls this harmlessly).
+ * Corrupt-JSON errors are propagated (not swallowed). Missing file is a no-op
+ * (BYO env-var path calls this harmlessly). Legacy wallets are assumed
+ * already migrated by the caller (`runExportKeys` calls `loadWallet` first).
  */
 export function markBackupAcknowledged(): void {
   if (!existsSync(WALLET_FILE)) return;
   const wallet = parseWalletFile();
   if (wallet.backupAcknowledgedAt) return;
   wallet.backupAcknowledgedAt = new Date().toISOString();
-  saveWallet(wallet);
+  // parseWalletFile returned RawWalletConfig; if we're here, the caller already
+  // ran migration so the on-disk file is complete. Cast is safe.
+  saveWallet(wallet as WalletConfig);
+}
+
+function logMigrations(migrations: string[]): void {
+  console.error([
+    "",
+    "  Wallet file migrated: " + migrations.join(", ") + ".",
+    "  Any existing funds are preserved — no addresses were overwritten.",
+    "  Run `npx @crush-rewards/mcp-server --export-keys` to back up the new key material.",
+    "",
+  ].join("\n"));
 }
 
 /**
  * Loads the wallet from ~/.crush/wallet.json, or generates a new multi-chain
- * wallet if none exists. The wallet is always authoritative — no partial state.
+ * wallet if none exists. If an existing file is missing keys for either chain
+ * (v0.2.x wallets have no Solana keys; a hypothetical Solana-only file would
+ * have no EVM keys), this function auto-migrates: it fills in the missing
+ * material, saves, and surfaces a stderr banner so the user knows what
+ * changed. Existing keys are never overwritten — any funds on already-funded
+ * addresses are preserved.
  */
 export async function loadOrCreateWallet(): Promise<{
   wallet: WalletConfig;
@@ -180,11 +237,22 @@ export async function loadOrCreateWallet(): Promise<{
   warnIfPermissive();
 
   if (existsSync(WALLET_FILE)) {
-    return { wallet: parseWalletFile(), isNew: false };
+    const loaded = parseWalletFile();
+    const { wallet, keyChanges, schemaTagged } = await migrateLegacyWallet(loaded);
+    if (keyChanges.length > 0 || schemaTagged) {
+      saveWallet(wallet);
+    }
+    // Only announce user-visible changes. A silent schema tag doesn't need a
+    // banner claiming "back up the new key material" — no new keys appeared.
+    if (keyChanges.length > 0) {
+      logMigrations(keyChanges);
+    }
+    return { wallet, isNew: false };
   }
 
   const [evm, solana] = await Promise.all([generateEvmWallet(), generateSolanaWallet()]);
   const wallet: WalletConfig = {
+    schemaVersion: CURRENT_WALLET_SCHEMA_VERSION,
     createdAt: new Date().toISOString(),
     evmPrivateKey: evm.privateKey,
     evmAddress: evm.address,
@@ -193,4 +261,57 @@ export async function loadOrCreateWallet(): Promise<{
   };
   saveWallet(wallet);
   return { wallet, isNew: true };
+}
+
+/**
+ * Brings a freshly-parsed wallet up to the current schema. Fills in any
+ * missing chain keys without touching ones that already exist, so funds on
+ * existing addresses are never stranded. Whenever new key material is
+ * introduced we clear `backupAcknowledgedAt` — the user needs to export the
+ * new keys before the backup state is meaningful again.
+ *
+ * Returns the complete `WalletConfig` plus two flags:
+ *   - `keyChanges`: user-visible, shown in the migration banner.
+ *   - `schemaTagged`: silent (persisted but not announced). Used to upgrade
+ *     v0.3.0 wallets to the explicit schemaVersion=1 marker without spamming
+ *     users with a banner about a field they don't care about.
+ */
+async function migrateLegacyWallet(
+  loaded: RawWalletConfig,
+): Promise<{ wallet: WalletConfig; keyChanges: string[]; schemaTagged: boolean }> {
+  const keyChanges: string[] = [];
+  let evmPrivateKey = loaded.evmPrivateKey;
+  let evmAddress = loaded.evmAddress;
+  let solanaPrivateKey = loaded.solanaPrivateKey;
+  let solanaAddress = loaded.solanaAddress;
+  let backupAcknowledgedAt = loaded.backupAcknowledgedAt;
+
+  if (!evmPrivateKey || !evmAddress) {
+    const evm = await generateEvmWallet();
+    evmPrivateKey = evm.privateKey;
+    evmAddress = evm.address;
+    backupAcknowledgedAt = undefined;
+    keyChanges.push("added EVM wallet (Base / Tempo)");
+  }
+
+  if (!solanaPrivateKey || !solanaAddress) {
+    const solana = await generateSolanaWallet();
+    solanaPrivateKey = solana.privateKey;
+    solanaAddress = solana.address;
+    backupAcknowledgedAt = undefined;
+    keyChanges.push("added Solana wallet");
+  }
+
+  const schemaTagged = loaded.schemaVersion === undefined;
+
+  const wallet: WalletConfig = {
+    schemaVersion: loaded.schemaVersion ?? CURRENT_WALLET_SCHEMA_VERSION,
+    createdAt: loaded.createdAt ?? new Date().toISOString(),
+    evmPrivateKey,
+    evmAddress,
+    solanaPrivateKey,
+    solanaAddress,
+    backupAcknowledgedAt,
+  };
+  return { wallet, keyChanges, schemaTagged };
 }
