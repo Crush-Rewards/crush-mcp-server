@@ -38,7 +38,7 @@ npx @crush-rewards/mcp-server --setup
 
 When both env vars are set, `~/.crush/wallet.json` is ignored entirely.
 
-> ⚠️ Do not use your primary wallet here. Use a dedicated low-balance "agent wallet" — per-query amounts are tiny (0.005–0.02 USDC), so a few dollars buys hundreds of queries.
+> ⚠️ Do not use your primary wallet here. Use a dedicated low-balance "agent wallet" — per-query amounts are tiny (0.01–0.02 USDC), so a few dollars buys hundreds of queries.
 
 ### Manual MCP config
 
@@ -86,7 +86,7 @@ Balance pre-checks are **optimizations**. If an RPC is rate-limited or down, the
 
 ## Tools
 
-### Shopper ($0.005/query)
+### Shopper ($0.01/query)
 
 | Tool | Description |
 |------|-------------|

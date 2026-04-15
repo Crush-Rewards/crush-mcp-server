@@ -29,7 +29,7 @@ export function printHelp() {
 
   Available Tools:
 
-    Shopper (0.005 USDC/query)
+    Shopper (0.01 USDC/query)
       best_price          Find the cheapest price across retailers
       price_history       Price trends over time
       deal_finder         Current deals in a category
@@ -113,7 +113,7 @@ function printByoInstructions() {
     "    • Use a dedicated wallet for this MCP — never your main funds.",
   );
   console.log(
-    "    • Tiny per-query amounts (0.005-0.02 USDC) mean a few dollars",
+    "    • Tiny per-query amounts (0.01-0.02 USDC) mean a few dollars",
   );
   console.log("      buys hundreds of queries; fund accordingly.");
   console.log("");
