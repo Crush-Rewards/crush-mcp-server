@@ -15,7 +15,7 @@ export interface ServerConfig {
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
-    version: "0.4.2",
+    version: "0.4.3",
   });
 
   // createPaidFetch validates both keys (throws a helpful error on malformed input)
@@ -44,7 +44,7 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
         "    • Fund with USDC on Solana — https://www.coinbase.com or any Solana wallet",
         "    • USDC mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "",
-        "Each query costs 0.005-0.02 USDC. Even 1 USDC gets you 50-200 queries.",
+        "Each query costs 0.01-0.02 USDC. Even 1 USDC gets you 50-100 queries.",
         "",
         "CLI commands (run in your own terminal, not via MCP):",
         "  --info         Show wallet paths, endpoints, and backup status (no keys shown)",
@@ -121,18 +121,18 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
     };
   }
 
-  // ── Shopper ($0.005/query) ──────────────────────────────────────
+  // ── Shopper ($0.01/query) ───────────────────────────────────────
 
   server.tool(
     "best_price",
-    "Find the best current price for a product across retailers. Costs $0.005.",
+    "Find the best current price for a product across retailers. Costs $0.01.",
     { q: z.string().describe("Product search query"), country: countrySchema, retailer: retailerSchema },
     async ({ q, country, retailer }) => query("/v1/shopper/best-price", { q, country, retailer }),
   );
 
   server.tool(
     "price_history",
-    "Get price history for a product over time. Costs $0.005.",
+    "Get price history for a product over time. Costs $0.01.",
     { q: z.string().describe("Product search query"), country: countrySchema, retailer: retailerSchema, days: daysSchema },
     async ({ q, country, retailer, days }) =>
       query("/v1/shopper/price-history", { q, country, retailer, days: days?.toString() }),
@@ -140,14 +140,14 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
 
   server.tool(
     "deal_finder",
-    "Find current deals and discounts in a product category. Costs $0.005.",
+    "Find current deals and discounts in a product category. Costs $0.01.",
     { category: z.string().describe("Product category (e.g. electronics, grocery)"), country: countrySchema, retailer: retailerSchema },
     async ({ category, country, retailer }) => query("/v1/shopper/deal-finder", { category, country, retailer }),
   );
 
   server.tool(
     "price_drop_alert",
-    "Check for recent price drops on a product. Costs $0.005.",
+    "Check for recent price drops on a product. Costs $0.01.",
     { q: z.string().describe("Product search query"), country: countrySchema, retailer: retailerSchema, days: daysSchema },
     async ({ q, country, retailer, days }) =>
       query("/v1/shopper/price-drop-alert", { q, country, retailer, days: days?.toString() }),
