@@ -45,12 +45,29 @@ When both env vars are set, `~/.crush/wallet.json` is ignored entirely.
 ```json
 {
   "mcpServers": {
-    "crush-pricing": {
+    "crush-analytics": {
       "command": "npx",
       "args": ["-y", "@crush-rewards/mcp-server"]
     }
   }
 }
+```
+
+### Migrating from `crush-pricing` (≤0.4.x)
+
+Versions ≤0.4.x registered the MCP under the slug `crush-pricing`. Starting in 0.5.0 the slug is `crush-analytics`. Existing setups keep working under the old slug — nothing breaks — but tools will appear as `mcp__crush-pricing__*` until you migrate.
+
+The fastest way is to re-run setup, which detects the legacy registration and offers to remove it for you:
+
+```bash
+npx @crush-rewards/mcp-server --setup
+```
+
+Or do it manually:
+
+```bash
+claude mcp remove crush-pricing
+claude mcp add -s user crush-analytics -- npx -y @crush-rewards/mcp-server
 ```
 
 ## CLI Commands

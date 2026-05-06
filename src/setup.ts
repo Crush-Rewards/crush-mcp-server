@@ -302,6 +302,21 @@ export async function runInfo() {
   console.log("");
 }
 
+const MCP_SLUG = "crush-analytics";
+const LEGACY_MCP_SLUG = "crush-pricing";
+
+// Tries to detect a previously-registered legacy slug so we can offer to remove
+// it. Best-effort: if `claude` isn't on PATH or `mcp list` changes its output
+// format, we silently skip the migration prompt rather than block setup.
+function detectLegacyRegistration(): boolean {
+  const result = spawnSync("claude", ["mcp", "list"], { encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout) return false;
+  // Match the slug at the start of a line (with or without leading whitespace),
+  // followed by a separator — avoids false positives from URLs or descriptions
+  // that happen to contain the word.
+  return new RegExp(`(^|\\n)\\s*${LEGACY_MCP_SLUG}[:\\s]`).test(result.stdout);
+}
+
 async function configureClaudeCode(rl: ReturnType<typeof createInterface>) {
   console.log("");
   const configureClaude = await ask(
@@ -314,7 +329,7 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>) {
     "add",
     "-s",
     "user",
-    "crush-pricing",
+    MCP_SLUG,
     "--",
     "npx",
     "-y",
@@ -326,13 +341,18 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>) {
     console.log("");
     console.log("  Add this to ~/.claude/settings.json under mcpServers:");
     console.log("");
-    console.log('    "crush-pricing": {');
+    console.log(`    "${MCP_SLUG}": {`);
     console.log('      "command": "npx",');
     console.log('      "args": ["-y", "@crush-rewards/mcp-server"]');
     console.log("    }");
     console.log("");
     console.log("  Or run this later:");
     console.log("    " + cmdString);
+    console.log("");
+    console.log(
+      `  If you previously registered \`${LEGACY_MCP_SLUG}\`, remove it first:`,
+    );
+    console.log(`    claude mcp remove ${LEGACY_MCP_SLUG}`);
     console.log("");
     return;
   }
@@ -364,12 +384,38 @@ async function configureClaudeCode(rl: ReturnType<typeof createInterface>) {
     return;
   }
 
+  // Migrate users who registered under the previous `crush-pricing` slug.
+  // Without this they'd end up with two registrations pointing at the same
+  // package and tools double-listed under both prefixes.
+  if (detectLegacyRegistration()) {
+    console.log("");
+    console.log(
+      `  Found legacy \`${LEGACY_MCP_SLUG}\` registration from an earlier version.`,
+    );
+    const removeLegacy = await ask(
+      rl,
+      `  Remove it before adding \`${MCP_SLUG}\`? (Y/n): `,
+    );
+    if (removeLegacy.toLowerCase() !== "n") {
+      const removal = spawnSync(
+        "claude",
+        ["mcp", "remove", LEGACY_MCP_SLUG],
+        { stdio: "inherit" },
+      );
+      if (removal.status !== 0) {
+        console.log(
+          `  (Removal returned ${removal.status}; continuing — you can clean it up manually with \`claude mcp remove ${LEGACY_MCP_SLUG}\`.)`,
+        );
+      }
+    }
+  }
+
   // spawnSync with argv array — no shell interpolation, no injection risk.
   const result = spawnSync("claude", claudeArgs, { stdio: "inherit" });
   if (result.status === 0) {
     console.log("");
     console.log(
-      "  Claude Code configured. Open a new session to use the pricing tools.",
+      `  Claude Code configured under \`${MCP_SLUG}\`. Open a new session to use the tools.`,
     );
   } else if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;

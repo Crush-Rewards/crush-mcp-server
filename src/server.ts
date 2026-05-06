@@ -14,8 +14,8 @@ export interface ServerConfig {
 
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
-    name: "crush-pricing-intelligence",
-    version: "0.4.3",
+    name: "crush-analytics",
+    version: "0.5.0",
   });
 
   // createPaidFetch validates both keys (throws a helpful error on malformed input)
