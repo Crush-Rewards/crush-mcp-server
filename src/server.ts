@@ -15,7 +15,7 @@ export interface ServerConfig {
 export async function createServer(config: ServerConfig): Promise<McpServer> {
   const server = new McpServer({
     name: "crush-pricing-intelligence",
-    version: "0.4.3",
+    version: "0.4.4",
   });
 
   // createPaidFetch validates both keys (throws a helpful error on malformed input)
@@ -173,10 +173,34 @@ export async function createServer(config: ServerConfig): Promise<McpServer> {
 
   server.tool(
     "promo_intelligence",
-    "Get promotional activity intelligence for a category. Costs $0.01.",
-    { category: z.string().describe("Product category"), country: countrySchema, retailer: retailerSchema, days: daysSchema },
-    async ({ category, country, retailer, days }) =>
-      query("/v1/marketing/promo-intelligence", { category, country, retailer, days: days?.toString() }),
+    "Analyze promotional activity within a category — promo frequency, average and max discount depth — over a date range. Pivot the breakdown with `aggregate_by`: default `brand` ranks brands within the category; `retailer` ranks retailers (pair with `brand=<name>` to answer 'which retailers run the deepest promos on Brand X in Category Y'). Response key mirrors the dimension: `brands: [...]` or `retailers: [...]`. Costs $0.01.",
+    {
+      category: z.string().describe("Product category"),
+      country: countrySchema,
+      retailer: retailerSchema,
+      brand: z
+        .string()
+        .optional()
+        .describe(
+          "Optional brand filter — limit aggregation to products of this brand (case-insensitive). REQUIRED when aggregate_by=retailer to get per-retailer promo depth for a specific brand.",
+        ),
+      aggregate_by: z
+        .enum(["brand", "retailer"])
+        .optional()
+        .describe(
+          "Group-by dimension. `brand` (default) ranks brands within the category. `retailer` ranks retailers — use this when the question asks 'which retailers' rather than 'which brands'.",
+        ),
+      days: daysSchema,
+    },
+    async ({ category, country, retailer, brand, aggregate_by, days }) =>
+      query("/v1/marketing/promo-intelligence", {
+        category,
+        country,
+        retailer,
+        brand,
+        aggregate_by,
+        days: days?.toString(),
+      }),
   );
 
   server.tool(
